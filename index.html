@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestione Spese Familiari</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 15px; padding: 0; background-color: #f4f4f9; color: #333; }
+        h1, h2 { text-align: center; color: #2c3e50; }
+        .card { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input, select, button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; font-size: 16px; }
+        button { background-color: #3498db; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        button:active { background-color: #2980b9; }
+        .btn-danger { background-color: #e74c3c; }
+        .btn-success { background-color: #2ecc71; }
+        .btn-warning { background-color: #f39c12; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #eee; }
+        .positivo { color: green; font-weight: bold; }
+        .negativo { color: red; font-weight: bold; }
+        .cat-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .cat-item button { width: auto; padding: 5px 10px; margin: 0; }
+        .actions-cell { display: flex; gap: 5px; }
+        .actions-cell button { width: auto; padding: 5px 8px; margin: 0; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <h1>Spese Familiari</h1>
+
+    <!-- FORM INSERIMENTO E MODIFICA MOVIMENTO -->
+    <div class="card">
+        <h2 id="formTitle">Nuova Operazione</h2>
+        <input type="hidden" id="editIndex" value="-1">
+        
+        <label>Data:</label>
+        <input type="date" id="data">
+
+        <label>Importo (+ per entrate, - per uscite):</label>
+        <input type="number" step="0.01" id="importo" placeholder="Es. -50.00 o 1200.00">
+
+        <label>Categoria:</label>
+        <select id="categoriaSelect"></select>
+
+        <label>Note:</label>
+        <input type="text" id="note" placeholder="Opzionale...">
+
+        <button onclick="salvaMovimento()" id="btnSalvaMovimento" class="btn-success">Aggiungi Movimento</button>
+        <button onclick="annullaModificaMovimento()" id="btnAnnullaModifica" class="btn-danger" style="display:none; margin-top: 5px;">Annulla Modifica</button>
+    </div>
+
+    <!-- GESTIONE CATEGORIE -->
+    <div class="card">
+        <h2>Gestione Categorie</h2>
+        
+        <label>Carica Elenco Categorie da CSV:</label>
+        <input type="file" id="csvCategorieInput" accept=".csv" onchange="importaCategorieCSV(event)">
+
+        <label style="margin-top: 15px;">Aggiungi singola categoria:</label>
+        <input type="text" id="nuovaCategoriaInput" placeholder="Nuova categoria...">
+        <button onclick="aggiungiCategoria()">+ Aggiungi Categoria</button>
+        
+        <button onclick="esportaCategorieCSV()" class="btn-warning" style="margin-top: 10px;">Esporta Categorie in CSV</button>
+
+        <div id="listaCategorieEdit" style="margin-top: 15px;"></div>
+    </div>
+
+    <!-- AZIONI & REPORT MOVIMENTI -->
+    <div class="card">
+        <h2>Report e Dati Movimenti</h2>
+        <button onclick="calcolaTotaliPerCategoria()" class="btn-warning">Sommatoria per Categoria</button>
+        
+        <label style="margin-top: 15px;">Seleziona il tipo di file per l'esportazione:</label>
+        <select id="nomeFileEsporta">
+            <option value="spesecasa.csv">spesecasa.csv</option>
+            <option value="Ticket.csv">Ticket.csv</option>
+            <option value="Davide.csv">Davide.csv</option>
+            <option value="Superflash.csv">Superflash.csv</option>
+            <option value="Pensioni.csv">Pensioni.csv</option>
+        </select>
+        <button onclick="esportaCSV()" class="btn-success">Esporta Movimenti in CSV</button>
+        
+        <label style="margin-top: 15px;">Importa Movimenti da CSV:</label>
+        <input type="file" id="csvFileInput" accept=".csv" onchange="importaCSV(event)">
+
+        <button onclick="azzeraTutto()" class="btn-danger" style="margin-top: 20px;">Azzera Transazioni</button>
+    </div>
+
+    <!-- TABELLA SOMMATORIA -->
+    <div class="card" id="cardTotali" style="display:none;">
+        <h2>Totali per Categoria</h2>
+        <div id="risultatoTotali"></div>
+    </div>
+
+    <!-- LISTA MOVIMENTI -->
+    <div class="card">
+        <h2>Storico Movimenti</h2>
+        <table id="tabellaMovimenti">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Importo</th>
+                    <th>Cat.</th>
+                    <th>Note</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <script>
+        // Inizializzazione dati da LocalStorage
+        let categorie = JSON.parse(localStorage.getItem('spese_categorie')) || ['Stipendio', 'Spesa', 'Bollette', 'Trasporti', 'Svago'];
+        let movimenti = JSON.parse(localStorage.getItem('spese_movimenti')) || [];
+
+        // Imposta data odierna di default
+        document.getElementById('data').valueAsDate = new Date();
+
+        function salvaDati() {
+            localStorage.setItem('spese_categorie', JSON.stringify(categorie));
+            localStorage.setItem('spese_movimenti', JSON.stringify(movimenti));
+            aggiornaUI();
+        }
+
+        function aggiornaUI() {
+            // Aggiorna Select Categorie
+            const select = document.getElementById('categoriaSelect');
+            select.innerHTML = '';
+            categorie.forEach(cat => {
+                let opt = document.createElement('option');
+                opt.value = cat;
+                opt.textContent = cat;
+                select.appendChild(opt);
+            });
+
+            // Aggiorna Lista Editabile Categorie
+            const divEditCat = document.getElementById('listaCategorieEdit');
+            divEditCat.innerHTML = '';
+            categorie.forEach((cat, index) => {
+                let d = document.createElement('div');
+                d.className = 'cat-item';
+                d.innerHTML = `
+                    <span>${cat}</span>
+                    <div>
+                        <button onclick="modificaCategoria(${index})">✏️</button>
+                        <button onclick="eliminaCategoria(${index})" class="btn-danger">🗑️</button>
+                    </div>
+                `;
+                divEditCat.appendChild(d);
+            });
+
+            // Aggiorna Tabella Movimenti
+            const tbody = document.querySelector('#tabellaMovimenti tbody');
+            tbody.innerHTML = '';
+            movimenti.forEach((m, index) => {
+                let tr = document.createElement('tr');
+                let classeImporto = m.importo >= 0 ? 'positivo' : 'negativo';
+                tr.innerHTML = `
+                    <td>${m.data}</td>
+                    <td class="${classeImporto}">${m.importo.toFixed(2)} €</td>
+                    <td>${m.categoria}</td>
+                    <td>${m.note}</td>
+                    <td class="actions-cell">
+                        <button onclick="caricaMovimentoInForm(${index})" class="btn-warning">✏️</button>
+                        <button onclick="eliminaMovimento(${index})" class="btn-danger">X</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function salvaMovimento() {
+            const data = document.getElementById('data').value;
+            const importo = parseFloat(document.getElementById('importo').value);
+            const categoria = document.getElementById('categoriaSelect').value;
+            const note = document.getElementById('note').value;
+            const editIndex = parseInt(document.getElementById('editIndex').value);
+
+            if (!data || isNaN(importo) || !categoria) {
+                alert('Compilare data, importo e categoria!');
+                return;
+            }
+
+            if (editIndex === -1) {
+                // Nuovo movimento
+                movimenti.push({ data, importo, categoria, note });
+            } else {
+                // Modifica movimento esistente
+                movimenti[editIndex] = { data, importo, categoria, note };
+                document.getElementById('editIndex').value = "-1";
+                document.getElementById('formTitle').textContent = "Nuova Operazione";
+                document.getElementById('btnSalvaMovimento').textContent = "Aggiungi Movimento";
+                document.getElementById('btnAnnullaModifica').style.display = "none";
+            }
+
+            document.getElementById('importo').value = '';
+            document.getElementById('note').value = '';
+            document.getElementById('data').valueAsDate = new Date();
+            salvaDati();
+        }
+
+        function caricaMovimentoInForm(index) {
+            const m = movimenti[index];
+            document.getElementById('data').value = m.data;
+            document.getElementById('importo').value = m.importo;
+            document.getElementById('categoriaSelect').value = m.categoria;
+            document.getElementById('note').value = m.note;
+            document.getElementById('editIndex').value = index;
+
+            document.getElementById('formTitle').textContent = "Modifica Operazione";
+            document.getElementById('btnSalvaMovimento').textContent = "Salva Modifiche";
+            document.getElementById('btnAnnullaModifica').style.display = "block";
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function annullaModificaMovimento() {
+            document.getElementById('editIndex').value = "-1";
+            document.getElementById('formTitle').textContent = "Nuova Operazione";
+            document.getElementById('btnSalvaMovimento').textContent = "Aggiungi Movimento";
+            document.getElementById('btnAnnullaModifica').style.display = "none";
+            document.getElementById('importo').value = '';
+            document.getElementById('note').value = '';
+            document.getElementById('data').valueAsDate = new Date();
+        }
+
+        function eliminaMovimento(index) {
+            if (confirm('Eliminare questo movimento?')) {
+                movimenti.splice(index, 1);
+                if (parseInt(document.getElementById('editIndex').value) === index) {
+                    annullaModificaMovimento();
+                }
+                salvaDati();
+            }
+        }
+
+        // --- GESTIONE CATEGORIE ---
+
+        function aggiungiCategoria() {
+            const val = document.getElementById('nuovaCategoriaInput').value.trim();
+            if (val && !categorie.includes(val)) {
+                categorie.push(val);
+                document.getElementById('nuovaCategoriaInput').value = '';
+                salvaDati();
+            }
+        }
+
+        function modificaCategoria(index) {
+            const nuovoNome = prompt('Modifica nome categoria:', categorie[index]);
+            if (nuovoNome && nuovoNome.trim() !== '') {
+                const vecchioNome = categorie[index];
+                categorie[index] = nuovoNome.trim();
+                
+                movimenti.forEach(m => {
+                    if (m.categoria === vecchioNome) m.categoria = nuovoNome.trim();
+                });
+                
+                salvaDati();
+            }
+        }
+
+        function eliminaCategoria(index) {
+            if (confirm(`Eliminare la categoria "${categorie[index]}"?`)) {
+                categorie.splice(index, 1);
+                salvaDati();
+            }
+        }
+
+        function importaCategorieCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const testo = e.target.result;
+                // Rimuove eventuali caratteri invisibili di inizio file (BOM)
+                const righe = testo.replace(/^\uFEFF/, '').split(/\r?\n/);
+                let aggiunte = 0;
+
+                righe.forEach(riga => {
+                    let cat = riga.replace(/"/g, '').trim();
+                    if (cat.includes(';') || cat.includes(',')) {
+                        cat = cat.split(/[;,]/)[0].replace(/"/g, '').trim();
+                    }
+                    const catLower = cat.toLowerCase();
+                    if (cat && catLower !== 'categoria' && catLower !== 'categorie' && !categorie.includes(cat)) {
+                        categorie.push(cat);
+                        aggiunte++;
+                    }
+                });
+
+                salvaDati();
+                alert(`Importate ${aggiunte} nuove categorie!`);
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        function esportaCategorieCSV() {
+            if (categorie.length === 0) {
+                alert('Nessuna categoria da esportare!');
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,Categoria\n" + categorie.join("\n");
+            let encodedUri = encodeURI(csvContent);
+            let link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "categorie_spese.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // --- REPORT & MOVIMENTI CSV ---
+
+        function calcolaTotaliPerCategoria() {
+            let totali = {};
+            let totaleGenerale = 0;
+
+            movimenti.forEach(m => {
+                if (!totali[m.categoria]) totali[m.categoria] = 0;
+                totali[m.categoria] += m.importo;
+                totaleGenerale += m.importo;
+            });
+
+            let html = '<table><tr><th>Categoria</th><th>Totale</th></tr>';
+            for (let cat in totali) {
+                let cl = totali[cat] >= 0 ? 'positivo' : 'negativo';
+                html += `<tr><td>${cat}</td><td class="${cl}">${totali[cat].toFixed(2)} €</td></tr>`;
+            }
+
+            let clGenerale = totaleGenerale >= 0 ? 'positivo' : 'negativo';
+            html += `<tr style="border-top: 2px solid #333; font-weight: bold; background-color: #f0f0f0;">
+                        <td>TOTALE COMPLESSIVO</td>
+                        <td class="${clGenerale}">${totaleGenerale.toFixed(2)} €</td>
+                     </tr>`;
+
+            html += '</table>';
+
+            document.getElementById('risultatoTotali').innerHTML = html;
+            document.getElementById('cardTotali').style.display = 'block';
+        }
+
+        function esportaCSV() {
+            if (movimenti.length === 0) {
+                alert('Nessun movimento da esportare!');
+                return;
+            }
+
+            const nomeFile = document.getElementById('nomeFileEsporta').value;
+            let csvContent = "data:text/csv;charset=utf-8,Data;Importo;Categoria;Note\n";
+            movimenti.forEach(m => {
+                csvContent += `${m.data};${m.importo};${m.categoria};"${m.note}"\n`;
+            });
+
+            let encodedUri = encodeURI(csvContent);
+            let link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", nomeFile);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function importaCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const testo = e.target.result;
+                const righe = testo.replace(/^\uFEFF/, '').split(/\r?\n/);
+                let importati = 0;
+
+                for (let i = 1; i < righe.length; i++) {
+                    let riga = righe[i].trim();
+                    if (!riga) continue;
+                    
+                    let colonne = riga.split(';');
+                    if (colonne.length >= 3) {
+                        let data = colonne[0].trim();
+                        let importo = parseFloat(colonne[1].trim());
+                        let categoria = colonne[2].trim();
+                        let note = colonne[3] ? colonne[3].replace(/"/g, '').trim() : '';
+
+                        if (data && !isNaN(importo) && categoria) {
+                            movimenti.push({ data, importo, categoria, note });
+                            if (!categorie.includes(categoria)) {
+                                categorie.push(categoria);
+                            }
+                            importati++;
+                        }
+                    }
+                }
+                salvaDati();
+                alert(`Importati con successo ${importati} movimenti dal file!`);
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        function azzeraTutto() {
+            if (confirm('SEI SICURO? Questo cancellerà permanentemente tutte le transazioni registrate, mantenendo le categorie!')) {
+                movimenti = [];
+                document.getElementById('cardTotali').style.display = 'none';
+                salvaDati();
+            }
+        }
+
+        // Caricamento iniziale
+        aggiornaUI();
+    </script>
+</body>
+</html>
